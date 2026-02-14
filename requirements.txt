@@ -1,0 +1,6 @@
+flask
+fastmcp
+a2wsgi
+uvicorn
+httpx
+beautifulsoup4
