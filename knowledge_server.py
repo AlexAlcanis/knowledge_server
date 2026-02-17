@@ -1,24 +1,14 @@
-from flask import Flask, jsonify
-from fastmcp import FastMCP
-from a2wsgi import ASGIMiddleware, WSGIMiddleware
-import uvicorn
 import os
 import httpx
+from flask import Flask, jsonify
+from fastmcp import FastMCP
 from bs4 import BeautifulSoup
+from a2wsgi import ASGIMiddleware
+import uvicorn
 
-# 1. Setup Flask
-flask_app = Flask(__name__)
-
-@flask_app.route("/")
-def home():
-    return jsonify({
-        "status": "Online",
-        "mcp_endpoint": "/mcp",
-        "knowledge_base_path": os.path.abspath("./knowledge_base")
-    })
-
-# 2. Setup MCP
-mcp = FastMCP("KnowledgeBase")
+# 1. Setup MCP with Stateless HTTP
+# stateless_http=True is crucial for Bedrock AgentCore
+mcp = FastMCP("KnowledgeBase", host="0.0.0.0", stateless_http=True)
 
 # --- TOOL 1: Read Web Links ---
 @mcp.tool()
@@ -35,7 +25,6 @@ async def read_link(url: str) -> str:
 def search_local_docs(filename: str) -> str:
     """Reads a specific file from the 'knowledge_base' folder."""
     base_path = "./knowledge_base"
-    # Create the folder if it doesn't exist so the tool doesn't crash
     if not os.path.exists(base_path): os.makedirs(base_path)
     
     file_path = os.path.join(base_path, filename)
@@ -45,29 +34,31 @@ def search_local_docs(filename: str) -> str:
     with open(file_path, 'r', encoding='utf-8') as f:
         return f.read()
 
-# 3. The ASGI Dispatcher (with Lifespan Fix)
+# 2. Setup Flask (Optional Status Page)
+flask_app = Flask(__name__)
+
+@flask_app.route("/")
+def home():
+    return jsonify({
+        "status": "Online",
+        "mcp_endpoint": "/mcp",
+        "knowledge_base_path": os.path.abspath("./knowledge_base")
+    })
+
+# 3. The Unified ASGI App
+# This ensures that Bedrock sees the /mcp endpoint correctly
 mcp_app = mcp.http_app()
 
-async def asgi_app(scope, receive, send):
-    if scope["type"] == "lifespan":
-        async with mcp_app.lifespan(scope):
-            while True:
-                message = await receive()
-                if message["type"] == "lifespan.startup":
-                    await send({"type": "lifespan.startup.complete"})
-                elif message["type"] == "lifespan.shutdown":
-                    await send({"type": "lifespan.shutdown.complete"})
-                    return
-    
-    if scope["type"] == "http":
-        if scope["path"].startswith("/mcp"):
-            await mcp_app(scope, receive, send)
-        else:
-            await WSGIMiddleware(flask_app)(scope, receive, send)
+async def asgi_handler(scope, receive, send):
+    if scope["type"] == "http" and scope["path"].startswith("/mcp"):
+        await mcp_app(scope, receive, send)
+    else:
+        # Fallback to Flask for the home page status
+        await ASGIMiddleware(flask_app)(scope, receive, send)
 
 if __name__ == "__main__":
-    # Ensure the knowledge folder exists before starting
     if not os.path.exists("./knowledge_base"):
         os.makedirs("./knowledge_base")
-    
-    uvicorn.run(asgi_app, host="0.0.0.0", port=8000, lifespan="on")
+        
+    # Standard port for App Runner/Bedrock integration is 8000 or 8080
+    uvicorn.run(asgi_handler, host="0.0.0.0", port=8000)
