@@ -4,3 +4,4 @@ a2wsgi
 uvicorn
 httpx
 beautifulsoup4
+boto3>=1.35.0
