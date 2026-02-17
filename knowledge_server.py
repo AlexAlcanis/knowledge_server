@@ -61,4 +61,5 @@ if __name__ == "__main__":
         os.makedirs("./knowledge_base")
         
     # Standard port for App Runner/Bedrock integration is 8000 or 8080
-    uvicorn.run(asgi_handler, host="0.0.0.0", port=8000)
+    uvicorn.run(asgi_handler, host="0.0.0.0", port=8080)
+
