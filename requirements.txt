@@ -4,4 +4,6 @@ a2wsgi
 uvicorn
 httpx
 beautifulsoup4
+streamlit
 boto3>=1.35.0
+botocore>=1.35.0
