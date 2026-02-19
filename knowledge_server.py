@@ -6,10 +6,10 @@ from bs4 import BeautifulSoup
 from a2wsgi import ASGIMiddleware
 import uvicorn
 
-# 1. Initialize FastMCP (Metadata only)
+# 1. Initialize FastMCP (Constructor MUST be simple in v3.0+)
 mcp = FastMCP("KnowledgeBase")
 
-# --- TOOL 1: Read Web Links ---
+# --- YOUR TOOLS ---
 @mcp.tool()
 async def read_link(url: str) -> str:
     """Fetches text content from a web link for context."""
@@ -19,34 +19,31 @@ async def read_link(url: str) -> str:
         for s in soup(["script", "style"]): s.extract()
         return soup.get_text(separator=' ', strip=True)[:5000]
 
-# --- TOOL 2: Read Local Docs ---
 @mcp.tool()
 def search_local_docs(filename: str) -> str:
     """Reads a specific file from the '/tmp/knowledge_base' folder."""
-    # App Runner root is read-only; use /tmp for runtime file operations
+    # App Runner root is read-only; use /tmp
     base_path = "/tmp/knowledge_base"
     if not os.path.exists(base_path): 
         os.makedirs(base_path, exist_ok=True)
     
     file_path = os.path.join(base_path, filename)
     if not os.path.exists(file_path):
-        return f"Error: {filename} not found. Available: {os.listdir(base_path)}"
-    
+        return f"Error: {filename} not found."
     with open(file_path, 'r', encoding='utf-8') as f:
         return f.read()
 
-# 2. Setup Flask (Optional Status Page)
+# 2. Setup Flask (Optional status/health check)
 flask_app = Flask(__name__)
-
 @flask_app.route("/")
 def home():
     return jsonify({"status": "Online", "mcp_endpoint": "/mcp"})
 
-# 3. Create the ASGI Application
-# MOVE stateless_http=True HERE (Required for Bedrock AgentCore)
+# 3. Create the ASGI App
+# stateless_http=True is REQUIRED for Bedrock AgentCore
 mcp_app = mcp.http_app(stateless_http=True)
 
-# This variable MUST be named asgi_app to match your Uvicorn/App Runner settings
+# The handler must be named asgi_app to match common deployment patterns
 async def asgi_app(scope, receive, send):
     if scope["type"] == "http" and scope["path"].startswith("/mcp"):
         await mcp_app(scope, receive, send)
@@ -55,7 +52,7 @@ async def asgi_app(scope, receive, send):
         await ASGIMiddleware(flask_app)(scope, receive, send)
 
 if __name__ == "__main__":
-    # Dynamically get the port from App Runner environment
+    # Dynamically get port (AWS uses 8080)
     port = int(os.environ.get("PORT", 8080))
     print(f"🚀 Starting MCP Server on 0.0.0.0:{port}")
-    uvicorn.run(asgi_app, host="0.0.0.0", port=port)
+    uvicorn.run(asgi_app, host="0.0.0.0", port=port)  
