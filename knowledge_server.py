@@ -6,7 +6,7 @@ from bs4 import BeautifulSoup
 from a2wsgi import ASGIMiddleware
 import uvicorn
 
-# 1. Initialize FastMCP (Constructor no longer accepts host/port/stateless_http)
+# 1. Initialize FastMCP (Metadata only)
 mcp = FastMCP("KnowledgeBase")
 
 # --- TOOL 1: Read Web Links ---
@@ -22,8 +22,8 @@ async def read_link(url: str) -> str:
 # --- TOOL 2: Read Local Docs ---
 @mcp.tool()
 def search_local_docs(filename: str) -> str:
-    """Reads a specific file from the 'knowledge_base' folder."""
-    # App Runner root is read-only; use /tmp for any runtime folder creation
+    """Reads a specific file from the '/tmp/knowledge_base' folder."""
+    # App Runner root is read-only; use /tmp for runtime file operations
     base_path = "/tmp/knowledge_base"
     if not os.path.exists(base_path): 
         os.makedirs(base_path, exist_ok=True)
@@ -35,7 +35,7 @@ def search_local_docs(filename: str) -> str:
     with open(file_path, 'r', encoding='utf-8') as f:
         return f.read()
 
-# 2. Setup Flask (Optional for status/health checks)
+# 2. Setup Flask (Optional Status Page)
 flask_app = Flask(__name__)
 
 @flask_app.route("/")
@@ -46,15 +46,16 @@ def home():
 # MOVE stateless_http=True HERE (Required for Bedrock AgentCore)
 mcp_app = mcp.http_app(stateless_http=True)
 
-async def asgi_handler(scope, receive, send):
+# This variable MUST be named asgi_app to match your Uvicorn/App Runner settings
+async def asgi_app(scope, receive, send):
     if scope["type"] == "http" and scope["path"].startswith("/mcp"):
         await mcp_app(scope, receive, send)
     else:
-        # Fallback to Flask for root health checks
+        # Fallback to Flask for root and health checks
         await ASGIMiddleware(flask_app)(scope, receive, send)
 
 if __name__ == "__main__":
     # Dynamically get the port from App Runner environment
     port = int(os.environ.get("PORT", 8080))
     print(f"🚀 Starting MCP Server on 0.0.0.0:{port}")
-    uvicorn.run(asgi_handler, host="0.0.0.0", port=port)
+    uvicorn.run(asgi_app, host="0.0.0.0", port=port)
