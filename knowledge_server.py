@@ -6,29 +6,40 @@ from bs4 import BeautifulSoup
 from a2wsgi import ASGIMiddleware
 import uvicorn
 
-# 1. Initialize FastMCP (Constructor MUST be simple in v3.0+)
+# 1. Initialize FastMCP
 mcp = FastMCP("KnowledgeBase")
 
-# --- YOUR TOOLS ---
+# --- TOOL 1: Read Web Links ---
 @mcp.tool()
 async def read_link(url: str) -> str:
     """Fetches text content from a web link for context."""
-    async with httpx.AsyncClient() as client:
-        response = await client.get(url, timeout=10.0)
-        soup = BeautifulSoup(response.text, 'html.parser')
-        for s in soup(["script", "style"]): s.extract()
-        return soup.get_text(separator=' ', strip=True)[:5000]
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, timeout=10.0)
+            soup = BeautifulSoup(response.text, 'html.parser')
+            for s in soup(["script", "style"]): s.extract()
+            return soup.get_text(separator=' ', strip=True)[:5000]
+    except Exception as e:
+        return f"Error fetching link: {str(e)}"
 
+# --- TOOL 2: Read Local Docs ---
 @mcp.tool()
 def search_local_docs(filename: str) -> str:
     """Reads a specific file from the '/tmp/knowledge_base' folder."""
     base_path = "/tmp/knowledge_base"
-    if not os.path.exists(base_path): 
+    
+    # Ensure directory exists so we don't 500
+    if not os.path.exists(base_path):
         os.makedirs(base_path, exist_ok=True)
     
     file_path = os.path.join(base_path, filename)
     if not os.path.exists(file_path):
-        return f"Error: {filename} not found."
+        try:
+            files = os.listdir(base_path)
+            return f"Error: {filename} not found. Available files: {files}"
+        except Exception:
+            return f"Error: {filename} not found and folder is inaccessible."
+    
     with open(file_path, 'r', encoding='utf-8') as f:
         return f.read()
 
@@ -36,24 +47,29 @@ def search_local_docs(filename: str) -> str:
 flask_app = Flask(__name__)
 @flask_app.route("/")
 def home():
-    # This helps App Runner's TCP/HTTP health check pass
     return jsonify({"status": "online", "mcp_path": "/mcp"})
 
 # 3. Create the ASGI App
-# stateless_http=True is MANDATORY for Bedrock AgentCore Gateways
+# MANDATORY: stateless_http=True for Bedrock AgentCore
 mcp_app = mcp.http_app(stateless_http=True)
 
-# The handler must be named asgi_app to match your Uvicorn call
 async def asgi_app(scope, receive, send):
-    # Route Gateway traffic to the MCP logic
     if scope["type"] == "http" and scope["path"].startswith("/mcp"):
-        await mcp_app(scope, receive, send)
+        # Wrap in try/except to prevent 500s from killing the handshake
+        try:
+            await mcp_app(scope, receive, send)
+        except Exception as e:
+            print(f"MCP Error: {e}")
+            await send({
+                "type": "http.response.start",
+                "status": 500,
+                "headers": [[b"content-type", b"text/plain"]]
+            })
+            await send({"type": "http.response.body", "body": str(e).encode()})
     else:
-        # Route everything else (like /) to Flask
         await ASGIMiddleware(flask_app)(scope, receive, send)
 
 if __name__ == "__main__":
-    # App Runner provides the PORT environment variable (defaulting to 8080)
     port = int(os.environ.get("PORT", 8080))
-    print(f"🚀 Starting MCP Server on 0.0.0.0:{port}")
+    # We use 0.0.0.0 so App Runner can route external traffic to the container
     uvicorn.run(asgi_app, host="0.0.0.0", port=port)
