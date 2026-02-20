@@ -22,7 +22,6 @@ async def read_link(url: str) -> str:
 @mcp.tool()
 def search_local_docs(filename: str) -> str:
     """Reads a specific file from the '/tmp/knowledge_base' folder."""
-    # App Runner root is read-only; use /tmp
     base_path = "/tmp/knowledge_base"
     if not os.path.exists(base_path): 
         os.makedirs(base_path, exist_ok=True)
@@ -33,26 +32,28 @@ def search_local_docs(filename: str) -> str:
     with open(file_path, 'r', encoding='utf-8') as f:
         return f.read()
 
-# 2. Setup Flask (Optional status/health check)
+# 2. Setup Flask for Root Health Check
 flask_app = Flask(__name__)
 @flask_app.route("/")
 def home():
-    return jsonify({"status": "Online", "mcp_endpoint": "/mcp"})
+    # This helps App Runner's TCP/HTTP health check pass
+    return jsonify({"status": "online", "mcp_path": "/mcp"})
 
 # 3. Create the ASGI App
-# stateless_http=True is REQUIRED for Bedrock AgentCore
+# stateless_http=True is MANDATORY for Bedrock AgentCore Gateways
 mcp_app = mcp.http_app(stateless_http=True)
 
-# The handler must be named asgi_app to match common deployment patterns
+# The handler must be named asgi_app to match your Uvicorn call
 async def asgi_app(scope, receive, send):
+    # Route Gateway traffic to the MCP logic
     if scope["type"] == "http" and scope["path"].startswith("/mcp"):
         await mcp_app(scope, receive, send)
     else:
-        # Fallback to Flask for root and health checks
+        # Route everything else (like /) to Flask
         await ASGIMiddleware(flask_app)(scope, receive, send)
 
 if __name__ == "__main__":
-    # Dynamically get port (AWS uses 8080)
+    # App Runner provides the PORT environment variable (defaulting to 8080)
     port = int(os.environ.get("PORT", 8080))
     print(f"🚀 Starting MCP Server on 0.0.0.0:{port}")
-    uvicorn.run(asgi_app, host="0.0.0.0", port=port)  
+    uvicorn.run(asgi_app, host="0.0.0.0", port=port)
