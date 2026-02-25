@@ -52,6 +52,11 @@ app = Starlette(
 )
 
 if __name__ == "__main__":
+    # App Runner provides the port via an environment variable. 
+    # If it's not there, we default to 8080 to match your AWS settings.
     port = int(os.environ.get("PORT", 8080))
-    # 'lifespan="on"' ensures Uvicorn triggers the Starlette startup logic
+    
+    print(f"🚀 Starting server on 0.0.0.0:{port}")
+    # Use lifespan="on" to ensure FastMCP initializes correctly
     uvicorn.run(app, host="0.0.0.0", port=port, lifespan="on")
+
