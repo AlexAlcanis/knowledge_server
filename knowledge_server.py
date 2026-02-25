@@ -5,7 +5,7 @@ from fastmcp import FastMCP
 from bs4 import BeautifulSoup
 from a2wsgi import ASGIMiddleware
 from starlette.applications import Starlette
-from starlette.routing import Route, Mount
+from starlette.routing import Mount
 import uvicorn
 
 # 1. Initialize FastMCP
@@ -24,12 +24,15 @@ async def read_link(url: str) -> str:
 def search_local_docs(filename: str) -> str:
     """Reads a file from /tmp/knowledge_base."""
     base_path = "/tmp/knowledge_base"
-    if not os.path.exists(base_path): os.makedirs(base_path, exist_ok=True)
+    if not os.path.exists(base_path): 
+        os.makedirs(base_path, exist_ok=True)
     file_path = os.path.join(base_path, filename)
-    if not os.path.exists(file_path): return f"Error: {filename} not found."
-    with open(file_path, 'r', encoding='utf-8') as f: return f.read()
+    if not os.path.exists(file_path): 
+        return f"Error: {filename} not found."
+    with open(file_path, 'r', encoding='utf-8') as f: 
+        return f.read()
 
-# 2. Setup Flask and Middleware
+# 2. Setup Flask (Health check & status)
 flask_app = Flask(__name__)
 @flask_app.route("/")
 def home():
@@ -38,18 +41,17 @@ def home():
 # 3. Create the MCP ASGI App
 mcp_app = mcp.http_app(stateless_http=True)
 
-# 4. The "Starlette" Fix: Unified App with Lifespan
-# This explicitly tells the server to run the mcp_app.lifespan on startup
+# 4. The Starlette Wrapper (The Fix)
+# This Mounts your MCP app and Flask app while preserving the Lifespan signal
 app = Starlette(
     routes=[
-        Mount("/mcp", app=mcp_app), # This handles everything under /mcp
-        Mount("/", app=ASGIMiddleware(flask_app)) # This handles the home page
+        Mount("/mcp", app=mcp_app),
+        Mount("/", app=ASGIMiddleware(flask_app))
     ],
-    lifespan=mcp_app.lifespan 
+    lifespan=mcp_app.lifespan  # Crucial: Tells the server to initialize MCP task groups
 )
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    # We run 'app' (the Starlette instance) instead of a custom handler
+    # 'lifespan="on"' ensures Uvicorn triggers the Starlette startup logic
     uvicorn.run(app, host="0.0.0.0", port=port, lifespan="on")
-
