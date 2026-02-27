@@ -7,9 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-# Expose the standard App Runner port
 EXPOSE 8080
 
-# Run ONLY the MCP server (not the shell script)
-CMD ["python", "knowledge_server.py"]
-
+# Use gunicorn instead of Flask's dev server
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "knowledge_server:app"]
