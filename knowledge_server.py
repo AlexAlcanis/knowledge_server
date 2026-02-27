@@ -15,6 +15,7 @@ def hello_world() -> str:
 
 # 2. Setup Flask for Health Checks
 flask_app = Flask(__name__)
+
 @flask_app.route("/")
 def home():
     return jsonify({"status": "online", "mcp_endpoint": "/mcp"})
@@ -23,18 +24,16 @@ def home():
 # stateless_http=True is REQUIRED for Bedrock
 mcp_app = mcp.http_app(stateless_http=True)
 
-# 4. The Starlette Wrapper (The Fix)
-# We use Starlette to manage the routing and the Lifespan (Startup)
+# 4. The Starlette Wrapper
 app = Starlette(
     routes=[
         Mount("/mcp", app=mcp_app),
         Mount("/", app=ASGIMiddleware(flask_app))
     ],
-    lifespan=mcp_app.lifespan  # This initializes the MCP Task Group
+    lifespan=mcp_app.lifespan
 )
 
 if __name__ == "__main__":
-    # App Runner provides the port via environment variable
     port = int(os.environ.get("PORT", 8080))
-    # We run the 'app' (Starlette), NOT a custom function
+    print(f"🚀 Starting MCP server on port {port}")
     uvicorn.run(app, host="0.0.0.0", port=port, lifespan="on")
