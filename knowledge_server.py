@@ -1,21 +1,15 @@
 import os
-from flask import Flask, jsonify
-from fastmcp import FastMCP
-from a2wsgi import ASGIMiddleware
-from starlette.applications import Starlette
-from starlette.routing import Mount
-import uvicorn
+import json
+from flask import Flask, request, jsonify
 
-# 1. Initialize FastMCP
-mcp = FastMCP("KnowledgeBase")
+app = Flask(__name__)
 
-@mcp.tool()
-def hello_world() -> str:
+# Simple MCP tools as functions
+def hello_world():
     """A simple test tool to verify MCP is working"""
     return "The MCP server is connected and working!"
 
-@mcp.tool()
-def get_server_info() -> dict:
+def get_server_info():
     """Get information about the MCP server"""
     return {
         "name": "KnowledgeBase MCP Server",
@@ -24,44 +18,141 @@ def get_server_info() -> dict:
         "tools_available": 2
     }
 
-# 2. Setup Flask for Health Checks
-flask_app = Flask(__name__)
+# MCP tool registry
+TOOLS = {
+    "hello_world": {
+        "name": "hello_world",
+        "description": "A simple test tool to verify MCP is working",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    },
+    "get_server_info": {
+        "name": "get_server_info",
+        "description": "Get information about the MCP server",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": []
+        }
+    }
+}
 
-@flask_app.route("/")
+@app.route("/")
 def home():
     return jsonify({
-        "status": "online", 
+        "status": "online",
         "service": "MCP Knowledge Server",
-        "mcp_endpoint": "/mcp"
+        "mcp_endpoint": "/mcp",
+        "tools": len(TOOLS)
     })
 
-@flask_app.route("/health")
+@app.route("/health")
 def health():
     return jsonify({"status": "healthy"})
 
-# 3. Create the MCP ASGI App with stateless_http=True for Bedrock
-mcp_app = mcp.http_app(stateless_http=True)
-
-# 4. Create Starlette app with proper lifespan handling
-app = Starlette(
-    routes=[
-        Mount("/mcp", app=mcp_app),
-        Mount("/", app=ASGIMiddleware(flask_app))
-    ],
-    lifespan=mcp_app.lifespan  # This ensures task group is initialized
-)
+@app.route("/mcp", methods=["POST"])
+def mcp_endpoint():
+    """Handle MCP JSON-RPC requests"""
+    try:
+        data = request.get_json()
+        
+        if not data:
+            return jsonify({
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32700,
+                    "message": "Parse error"
+                },
+                "id": None
+            }), 400
+        
+        method = data.get("method")
+        params = data.get("params", {})
+        request_id = data.get("id")
+        
+        # Handle MCP protocol methods
+        if method == "tools/list":
+            return jsonify({
+                "jsonrpc": "2.0",
+                "result": {
+                    "tools": list(TOOLS.values())
+                },
+                "id": request_id
+            })
+        
+        elif method == "tools/call":
+            tool_name = params.get("name")
+            
+            if tool_name == "hello_world":
+                result = hello_world()
+            elif tool_name == "get_server_info":
+                result = get_server_info()
+            else:
+                return jsonify({
+                    "jsonrpc": "2.0",
+                    "error": {
+                        "code": -32601,
+                        "message": f"Tool not found: {tool_name}"
+                    },
+                    "id": request_id
+                }), 404
+            
+            return jsonify({
+                "jsonrpc": "2.0",
+                "result": {
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": json.dumps(result) if isinstance(result, dict) else str(result)
+                        }
+                    ]
+                },
+                "id": request_id
+            })
+        
+        elif method == "initialize":
+            return jsonify({
+                "jsonrpc": "2.0",
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {
+                        "tools": {}
+                    },
+                    "serverInfo": {
+                        "name": "KnowledgeBase",
+                        "version": "1.0.0"
+                    }
+                },
+                "id": request_id
+            })
+        
+        else:
+            return jsonify({
+                "jsonrpc": "2.0",
+                "error": {
+                    "code": -32601,
+                    "message": f"Method not found: {method}"
+                },
+                "id": request_id
+            }), 404
+    
+    except Exception as e:
+        return jsonify({
+            "jsonrpc": "2.0",
+            "error": {
+                "code": -32603,
+                "message": f"Internal error: {str(e)}"
+            },
+            "id": request_id if 'request_id' in locals() else None
+        }), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    print(f"🚀 Starting MCP Knowledge Server on port {port}")
+    print(f"🚀 Starting Simple MCP Server on port {port}")
     print(f"   Health check: http://0.0.0.0:{port}/")
     print(f"   MCP endpoint: http://0.0.0.0:{port}/mcp")
     
-    # Run with lifespan enabled
-    uvicorn.run(
-        app, 
-        host="0.0.0.0", 
-        port=port,
-        lifespan="on",  # Critical: enables lifespan events
-        log_level="info"
-    )
+    app.run(host="0.0.0.0", port=port, debug=False)
