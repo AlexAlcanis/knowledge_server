@@ -4,7 +4,7 @@ from flask import Flask, request, jsonify
 
 app = Flask(__name__)
 
-# Simple MCP tools
+# MCP tools
 def hello_world():
     return "The MCP server is connected and working!"
 
@@ -31,7 +31,12 @@ TOOLS = {
 
 @app.route("/")
 def home():
-    return jsonify({"status": "online", "service": "MCP Knowledge Server", "mcp_endpoint": "/mcp", "tools": len(TOOLS)})
+    return jsonify({
+        "status": "online",
+        "service": "MCP Knowledge Server",
+        "mcp_endpoint": "/mcp",
+        "tools": len(TOOLS)
+    })
 
 @app.route("/health")
 def health():
@@ -42,14 +47,22 @@ def mcp_endpoint():
     try:
         data = request.get_json()
         if not data:
-            return jsonify({"jsonrpc": "2.0", "error": {"code": -32700, "message": "Parse error"}, "id": None}), 400
+            return jsonify({
+                "jsonrpc": "2.0",
+                "error": {"code": -32700, "message": "Parse error"},
+                "id": None
+            }), 400
         
         method = data.get("method")
         params = data.get("params", {})
         request_id = data.get("id")
         
         if method == "tools/list":
-            return jsonify({"jsonrpc": "2.0", "result": {"tools": list(TOOLS.values())}, "id": request_id})
+            return jsonify({
+                "jsonrpc": "2.0",
+                "result": {"tools": list(TOOLS.values())},
+                "id": request_id
+            })
         
         elif method == "tools/call":
             tool_name = params.get("name")
@@ -58,20 +71,52 @@ def mcp_endpoint():
             elif tool_name == "get_server_info":
                 result = get_server_info()
             else:
-                return jsonify({"jsonrpc": "2.0", "error": {"code": -32601, "message": f"Tool not found: {tool_name}"}, "id": request_id}), 404
+                return jsonify({
+                    "jsonrpc": "2.0",
+                    "error": {"code": -32601, "message": f"Tool not found: {tool_name}"},
+                    "id": request_id
+                }), 404
             
-            return jsonify({"jsonrpc": "2.0", "result": {"content": [{"type": "text", "text": json.dumps(result) if isinstance(result, dict) else str(result)}]}, "id": request_id})
+            return jsonify({
+                "jsonrpc": "2.0",
+                "result": {
+                    "content": [{
+                        "type": "text",
+                        "text": json.dumps(result) if isinstance(result, dict) else str(result)
+                    }]
+                },
+                "id": request_id
+            })
         
         elif method == "initialize":
-            return jsonify({"jsonrpc": "2.0", "result": {"protocolVersion": "2024-11-05", "capabilities": {"tools": {}}, "serverInfo": {"name": "KnowledgeBase", "version": "1.0.0"}}, "id": request_id})
+            return jsonify({
+                "jsonrpc": "2.0",
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": {"tools": {}},
+                    "serverInfo": {"name": "KnowledgeBase", "version": "1.0.0"}
+                },
+                "id": request_id
+            })
         
         else:
-            return jsonify({"jsonrpc": "2.0", "error": {"code": -32601, "message": f"Method not found: {method}"}, "id": request_id}), 404
+            return jsonify({
+                "jsonrpc": "2.0",
+                "error": {"code": -32601, "message": f"Method not found: {method}"},
+                "id": request_id
+            }), 404
     
     except Exception as e:
-        return jsonify({"jsonrpc": "2.0", "error": {"code": -32603, "message": f"Internal error: {str(e)}"}, "id": request_id if 'request_id' in locals() else None}), 500
+        return jsonify({
+            "jsonrpc": "2.0",
+            "error": {"code": -32603, "message": f"Internal error: {str(e)}"},
+            "id": request_id if 'request_id' in locals() else None
+        }), 500
 
+# This is critical for App Runner
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    print(f"🚀 Starting Simple MCP Server on port {port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    print(f"Starting MCP Server on port {port}", flush=True)
+    # Use 0.0.0.0 to listen on all interfaces
+    # threaded=True for better concurrency
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
