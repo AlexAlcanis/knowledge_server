@@ -1,37 +1,42 @@
 import os
+import json
 from fastmcp import FastMCP
 from starlette.responses import JSONResponse
+from starlette.requests import Request
 
-# 1. Initialize FastMCP with the AWS-required flag
+# 1. Initialize FastMCP with stateless mode for AWS
 mcp = FastMCP("KnowledgeBase", stateless_http=True)
 
-# 2. Add the Health Check for App Runner
+# 2. Health Check for App Runner
 @mcp.custom_route("GET", "/")
-def health_check():
-    return {"status": "online"}
+async def health_check(request):
+    return JSONResponse({"status": "online", "mcp_endpoint": "/mcp"})
 
-# 3. THE FIX: Explicitly handle the "notifications/initialized" method
-# This prevents the -32601 "Method not found" error during Gateway Sync
+# 3. THE HANDSHAKE FIX: Catch the AWS "initialized" ping
 @mcp.custom_route("POST", "/mcp")
-async def handle_mcp_post(request):
+async def handle_mcp_handshake(request: Request):
     try:
         body = await request.json()
+        # If AWS sends the initialization ping, reply immediately with success
         if body.get("method") == "notifications/initialized":
-            # Return a standard JSON-RPC success response
-            return JSONResponse({"jsonrpc": "2.0", "result": "ok", "id": body.get("id")})
-    except:
+            return JSONResponse({
+                "jsonrpc": "2.0",
+                "result": "ok",
+                "id": body.get("id")
+            })
+    except Exception:
         pass
     
-    # Otherwise, let the normal MCP handler take over
+    # Otherwise, pass the request to the standard MCP handler
     return await mcp.handle_http_request(request)
 
 # --- YOUR TOOLS ---
 @mcp.tool()
-def hello_world() -> str:
-    """Simple test tool."""
-    return "The MCP server is connected and working!"
+def read_knowledge_base() -> str:
+    """Returns a test message to verify the tool is visible to Bedrock."""
+    return "The Knowledge Base is connected and tools are active!"
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    # Using the built-in run method
+    # mcp.run handles the ASGI lifespan automatically
     mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
