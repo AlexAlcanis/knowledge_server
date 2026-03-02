@@ -1,50 +1,53 @@
 import os
 import uvicorn
-from mcp.server import Server
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from starlette.applications import Starlette
 from starlette.routing import Route
 from starlette.responses import JSONResponse, Response
 
-# 1. Initialize FastMCP (We use it for tool definitions)
+# 1. Initialize FastMCP (strictly for tool definitions)
 mcp = FastMCP("KnowledgeBase", stateless_http=True)
 
 @mcp.tool()
-def read_knowledge_base() -> str:
+def read_kb() -> str:
     """A test tool to verify the connection."""
-    return "Handshake complete. The Knowledge Base is now synchronized!"
+    return "Handshake successful. Tools are active!"
 
-# 2. Setup the Starlette Wrapper to fix the Handshake
+# 2. THE FINAL HANDSHAKE FIX
 async def handle_mcp_post(request):
     try:
         body = await request.json()
+        method = body.get("method")
         
-        # FIX: Explicitly handle the 'notifications/initialized' signal
-        # Bedrock Gateway sends this to verify your server exists.
-        if body.get("method") == "notifications/initialized":
-            # Per MCP spec, notifications get a 202 or 200 with no body
-            return Response(status_code=202)
+        # AWS sends this to 'wake up' the server. 
+        # FastMCP usually crashes here. We force a success response.
+        if method == "notifications/initialized":
+            return Response(status_code=200) 
             
-    except Exception:
-        pass
-    
-    # Delegate everything else to the FastMCP engine
-    return await mcp.handle_http_request(request)
+        # If it's a tool call or tool listing, pass it to the engine
+        return await mcp.handle_http_request(request)
+            
+    except Exception as e:
+        # Return a valid JSON-RPC error instead of a crash
+        return JSONResponse({
+            "jsonrpc": "2.0",
+            "error": {"code": -32700, "message": "Parse error"},
+            "id": None
+        }, status_code=400)
 
 async def health_check(request):
     return JSONResponse({"status": "online"})
 
-# 3. Create the ASGI App
+# 3. Create the Starlette App
+# We define the route manually to ensure handle_mcp_post is the ONLY thing answering /mcp
 app = Starlette(
     routes=[
         Route("/", endpoint=health_check, methods=["GET"]),
         Route("/mcp", endpoint=handle_mcp_post, methods=["POST"]),
     ],
-    # This wakes up the MCP background task groups
     lifespan=mcp.http_app(stateless_http=True).lifespan
 )
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
-    # We must use lifespan="on" for the task groups to initialize
     uvicorn.run(app, host="0.0.0.0", port=port, lifespan="on")
