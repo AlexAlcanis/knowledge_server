@@ -113,10 +113,7 @@ def mcp_endpoint():
             "id": request_id if 'request_id' in locals() else None
         }), 500
 
-# This is critical for App Runner
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     print(f"Starting MCP Server on port {port}", flush=True)
-    # Use 0.0.0.0 to listen on all interfaces
-    # threaded=True for better concurrency
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
