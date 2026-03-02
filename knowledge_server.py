@@ -1,48 +1,49 @@
 import os
+import json
 from fastmcp import FastMCP
 from starlette.applications import Starlette
-from starlette.routing import Route, Mount
-from starlette.responses import JSONResponse
+from starlette.routing import Route
+from starlette.responses import JSONResponse, Response
 
 # 1. Initialize FastMCP
 mcp = FastMCP("KnowledgeBase", stateless_http=True)
 
-# --- YOUR TOOLS ---
-@mcp.tool()
-def read_knowledge_base() -> str:
-    """A test tool to verify the connection is alive."""
-    return "Success! The MCP server and Bedrock Gateway are now synchronized."
-
-# 2. THE HANDSHAKE FIX: Force a success response for AWS
+# 2. THE HANDSHAKE FIX: Catch the AWS 'initialized' ping manually
 async def handle_mcp_post(request):
     try:
         body = await request.json()
-        # If AWS sends 'notifications/initialized', we say 'ok' immediately.
-        # This stops the -32601 'Method not found' error.
+        
+        # AWS sends 'notifications/initialized' (a notification has no 'id')
+        # We MUST return a 200 OK (empty) or a 202 Accepted to satisfy the Gateway
         if body.get("method") == "notifications/initialized":
-            return JSONResponse({"jsonrpc": "2.0", "result": "ok", "id": body.get("id")})
+            # Per JSON-RPC spec, notifications shouldn't get a response,
+            # but AWS Gateway often requires a 200 OK to complete the sync.
+            return Response(status_code=200)
+            
     except Exception:
         pass
     
     # For all other tool calls, pass to the FastMCP handler
     return await mcp.handle_http_request(request)
 
-async def home(request):
+async def health_check(request):
     return JSONResponse({"status": "online"})
 
-# 3. Create the Starlette App (The Routing Bridge)
-# This setup ensures the 'lifespan' (startup) signals reach the MCP engine
+# 3. Explicit Starlette App (The Shield)
 app = Starlette(
     routes=[
-        Route("/", endpoint=home, methods=["GET"]),
-        Route("/mcp", endpoint=handle_mcp_post, methods=["POST"]),
-        Mount("/mcp", app=mcp.http_app(stateless_http=True))
+        Route("/", endpoint=health_check, methods=["GET"]),
+        Route("/mcp", endpoint=handle_mcp_post, methods=["POST"])
     ],
     lifespan=mcp.http_app(stateless_http=True).lifespan
 )
 
+@mcp.tool()
+def hello_world() -> str:
+    """A test tool to verify the connection is alive."""
+    return "Success! The MCP server and Bedrock Gateway are now synchronized."
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
     import uvicorn
-    # lifespan="on" is mandatory to wake up the MCP task groups
     uvicorn.run(app, host="0.0.0.0", port=port, lifespan="on")
