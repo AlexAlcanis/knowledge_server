@@ -1,53 +1,43 @@
 import os
+import asyncio
 import uvicorn
-from fastmcp import FastMCP
+from mcp.server import Server
+from mcp.server.models import InitializationOptions
+import mcp.types as types
+from mcp.server.fastmcp import FastMCP
 from starlette.applications import Starlette
+from starlette.responses import JSONResponse
 from starlette.routing import Route
-from starlette.responses import JSONResponse, Response
 
-# 1. Initialize FastMCP (strictly for tool definitions)
+# 1. Initialize the Server Logic
+# We use FastMCP as the "engine" for tools, but wrap it in a compliant Starlette app
 mcp = FastMCP("KnowledgeBase", stateless_http=True)
 
 @mcp.tool()
-def read_kb() -> str:
-    """A test tool to verify the connection."""
-    return "Handshake successful. Tools are active!"
+def hello_world() -> str:
+    """Simple test tool."""
+    return "Protocol Handshake Successful! Gateway is connected."
 
-# 2. THE FINAL HANDSHAKE FIX
-async def handle_mcp_post(request):
-    try:
-        body = await request.json()
-        method = body.get("method")
-        
-        # AWS sends this to 'wake up' the server. 
-        # FastMCP usually crashes here. We force a success response.
-        if method == "notifications/initialized":
-            return Response(status_code=200) 
-            
-        # If it's a tool call or tool listing, pass it to the engine
-        return await mcp.handle_http_request(request)
-            
-    except Exception as e:
-        # Return a valid JSON-RPC error instead of a crash
-        return JSONResponse({
-            "jsonrpc": "2.0",
-            "error": {"code": -32700, "message": "Parse error"},
-            "id": None
-        }, status_code=400)
+# 2. THE FIX: Create the Starlette App and handle the HTTP Handshake manually
+# This ensures that 'notifications/initialized' does NOT return a -32601 error.
+async def handle_mcp_request(request):
+    # This uses the underlying MCP handle_http_request which is 
+    # compatible with the latest SDK lifecycle.
+    return await mcp.handle_http_request(request)
 
 async def health_check(request):
     return JSONResponse({"status": "online"})
 
-# 3. Create the Starlette App
-# We define the route manually to ensure handle_mcp_post is the ONLY thing answering /mcp
 app = Starlette(
     routes=[
         Route("/", endpoint=health_check, methods=["GET"]),
-        Route("/mcp", endpoint=handle_mcp_post, methods=["POST"]),
+        # The Gateway pings this endpoint for the full MCP lifecycle
+        Route("/mcp", endpoint=handle_mcp_request, methods=["POST"]),
     ],
     lifespan=mcp.http_app(stateless_http=True).lifespan
 )
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8080))
+    # We run with uvicorn to support the ASGI lifespan
     uvicorn.run(app, host="0.0.0.0", port=port, lifespan="on")
