@@ -1,5 +1,5 @@
 version: 1.0
-runtime: python3
+runtime: python311
 build:
   commands:
     build:
@@ -8,3 +8,4 @@ run:
   command: python knowledge_server.py
   network:
     port: 8080
+
