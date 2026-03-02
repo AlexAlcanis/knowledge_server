@@ -1,2 +1,5 @@
+fastmcp
 flask
-gunicorn
+uvicorn
+httpx
+beautifulsoup4
