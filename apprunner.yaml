@@ -6,8 +6,3 @@ build:
       - pip3 install -r requirements.txt
 run:
   command: python3 knowledge_server.py
-  network:
-    port: 8080
-  env:
-    - name: PORT
-      value: "8080"
