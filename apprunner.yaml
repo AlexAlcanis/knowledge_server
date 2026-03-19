@@ -1,6 +1,6 @@
 version: 1.0
 
-runtime: python3
+runtime: python311  # Specified version directly
 
 build:
   commands:
@@ -10,8 +10,18 @@ build:
 
 run:
   runtime-version: 3.11
-  command: uvicorn knowledge_server.py --host 0.0.0.0 --port 8080 --lifespan on
+  # If you want to run BOTH services (MCP + Secondary), use the script:
+  command: sh ./start_services.sh
+  
+  # If you decide to run ONLY the MCP Flask server:
+  # command: gunicorn --bind 0.0.0.0:8080 knowledge_server:app
+  
   network:
     port: 8080
-    env: PORT
+  
+  env:
+    - name: PORT
+      value: "8080"
+    - name: FLASK_ENV
+      value: "production"
 
